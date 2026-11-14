@@ -1,0 +1,474 @@
+#include "raylib.h"
+#include <string>
+#include <cmath>
+
+// Game States (Screens)
+enum GameScreen {
+    WELCOME,
+    RULES,
+    MODE_SELECT,
+    CONTROL_SELECT,
+    PRE_START,      // Choose between View Tutorial or direct Start Game
+    TUTORIAL,       // Interactive mini-demo screen
+    COUNTDOWN,
+    GAMEPLAY,
+    GAMEOVER
+};
+
+// Helper function to draw a clickable button and return true if clicked
+bool DrawButton(Rectangle bounds, const char* text, Color baseColor, Color hoverColor, Color textColor) {
+    Vector2 mousePoint = GetMousePosition();
+    bool isHover = CheckCollisionPointRec(mousePoint, bounds);
+    
+    DrawRectangleRec(bounds, isHover ? hoverColor : baseColor);
+    DrawRectangleLinesEx(bounds, 2, WHITE);
+    
+    int fontSize = 24;
+    int textWidth = MeasureText(text, fontSize);
+    DrawText(text, bounds.x + (bounds.width - textWidth) / 2, bounds.y + (bounds.height - fontSize) / 2, fontSize, textColor);
+    
+    return isHover && IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+}
+
+int main() {
+    const int screenWidth = 900;
+    const int screenHeight = 600;
+
+    InitWindow(screenWidth, screenHeight, "Bounce Back Pong - By Sakshi.M & Pari.P");
+    SetTargetFPS(60);
+
+    GameScreen currentScreen = WELCOME;
+
+    // Game Settings
+    bool isSolo = true;
+    bool useMouse = false; // Only available in solo
+    
+    // Countdown variables
+    float countdownTimer = 3.0f;
+
+    // Gameplay variables
+    int score1 = 0;       // Solo score OR Player 1 (Left) score
+    int score2 = 0;       // Player 2 (Right) score
+    int lastSpeedMilestone = 0;
+    std::string winnerText = "";
+
+    // Main Match Paddles
+    float paddleWidth = 15.0f;
+    float paddleHeight = 100.0f;
+    float paddleSpeed = 420.0f;
+    Rectangle leftPaddle = { 30, screenHeight / 2.0f - paddleHeight / 2.0f, paddleWidth, paddleHeight };
+    Rectangle rightPaddle = { screenWidth - 30 - paddleWidth, screenHeight / 2.0f - paddleHeight / 2.0f, paddleWidth, paddleHeight };
+
+    // Main Match Ball
+    Vector2 ballPos = { screenWidth / 2.0f, screenHeight / 2.0f };
+    Vector2 ballSpeed = { 350.0f, 250.0f };
+    float ballRadius = 10.0f;
+    float speedMultiplier = 1.0f;
+
+    // Interactive Tutorial Mini-Arena Variables
+    Rectangle demoBox = { 150, 145, 600, 240 };
+    Rectangle demoLeftPaddle = { demoBox.x + 20, demoBox.y + 85, 12, 70 };
+    Rectangle demoRightPaddle = { demoBox.x + demoBox.width - 32, demoBox.y + 85, 12, 70 };
+    Vector2 demoBallPos = { demoBox.x + demoBox.width / 2.0f, demoBox.y + demoBox.height / 2.0f };
+    Vector2 demoBallSpeed = { 240.0f, 160.0f };
+    float demoBallRadius = 8.0f;
+
+    // Reset Tutorial Demo State
+    auto ResetDemo = [&]() {
+        demoLeftPaddle.y = demoBox.y + (demoBox.height - demoLeftPaddle.height) / 2.0f;
+        demoRightPaddle.y = demoBox.y + (demoBox.height - demoRightPaddle.height) / 2.0f;
+        demoBallPos = { demoBox.x + demoBox.width / 2.0f, demoBox.y + demoBox.height / 2.0f };
+        demoBallSpeed = { 240.0f, 160.0f };
+    };
+
+    // Reset Main Match State
+    auto ResetMatch = [&]() {
+        score1 = 0;
+        score2 = 0;
+        lastSpeedMilestone = 0;
+        speedMultiplier = 1.0f;
+        leftPaddle.y = screenHeight / 2.0f - paddleHeight / 2.0f;
+        rightPaddle.y = screenHeight / 2.0f - paddleHeight / 2.0f;
+        ballPos = { screenWidth / 2.0f, screenHeight / 2.0f };
+        ballSpeed = { 350.0f, 220.0f };
+        countdownTimer = 3.0f;
+    };
+
+    while (!WindowShouldClose()) {
+        float dt = GetFrameTime();
+
+        // ---------------------------------------------------------
+        // UPDATE LOGIC
+        // ---------------------------------------------------------
+        if (currentScreen == TUTORIAL) {
+            // Interactive Left Paddle Movement inside Demo Box
+            if (isSolo && useMouse) {
+                demoLeftPaddle.y = GetMouseY() - demoLeftPaddle.height / 2.0f;
+            } else {
+                if (IsKeyDown(KEY_W)) demoLeftPaddle.y -= 320.0f * dt;
+                if (IsKeyDown(KEY_S)) demoLeftPaddle.y += 320.0f * dt;
+            }
+
+            // Clamp Demo Left Paddle inside Demo Box
+            if (demoLeftPaddle.y < demoBox.y + 5) demoLeftPaddle.y = demoBox.y + 5;
+            if (demoLeftPaddle.y + demoLeftPaddle.height > demoBox.y + demoBox.height - 5) {
+                demoLeftPaddle.y = demoBox.y + demoBox.height - 5 - demoLeftPaddle.height;
+            }
+
+            // Interactive Right Paddle Movement (2-Player Demo)
+            if (!isSolo) {
+                if (IsKeyDown(KEY_UP)) demoRightPaddle.y -= 320.0f * dt;
+                if (IsKeyDown(KEY_DOWN)) demoRightPaddle.y += 320.0f * dt;
+
+                if (demoRightPaddle.y < demoBox.y + 5) demoRightPaddle.y = demoBox.y + 5;
+                if (demoRightPaddle.y + demoRightPaddle.height > demoBox.y + demoBox.height - 5) {
+                    demoRightPaddle.y = demoBox.y + demoBox.height - 5 - demoRightPaddle.height;
+                }
+            }
+
+            // Demo Ball Movement
+            demoBallPos.x += demoBallSpeed.x * dt;
+            demoBallPos.y += demoBallSpeed.y * dt;
+
+            // Top & Bottom Demo Box Walls
+            if (demoBallPos.y - demoBallRadius <= demoBox.y) {
+                demoBallPos.y = demoBox.y + demoBallRadius;
+                demoBallSpeed.y *= -1;
+            }
+            if (demoBallPos.y + demoBallRadius >= demoBox.y + demoBox.height) {
+                demoBallPos.y = demoBox.y + demoBox.height - demoBallRadius;
+                demoBallSpeed.y *= -1;
+            }
+
+            // Demo Left Paddle Collision
+            if (CheckCollisionCircleRec(demoBallPos, demoBallRadius, demoLeftPaddle)) {
+                demoBallPos.x = demoLeftPaddle.x + demoLeftPaddle.width + demoBallRadius;
+                demoBallSpeed.x = fabs(demoBallSpeed.x);
+            }
+
+            // Demo Right Side (Backboard in Solo, Paddle in 2P)
+            if (isSolo) {
+                if (demoBallPos.x + demoBallRadius >= demoBox.x + demoBox.width - 10) {
+                    demoBallPos.x = demoBox.x + demoBox.width - 10 - demoBallRadius;
+                    demoBallSpeed.x = -fabs(demoBallSpeed.x);
+                }
+            } else {
+                if (CheckCollisionCircleRec(demoBallPos, demoBallRadius, demoRightPaddle)) {
+                    demoBallPos.x = demoRightPaddle.x - demoBallRadius;
+                    demoBallSpeed.x = -fabs(demoBallSpeed.x);
+                }
+            }
+
+            // Auto-reset Demo Ball if missed (no penalty in tutorial)
+            if (demoBallPos.x < demoBox.x || demoBallPos.x > demoBox.x + demoBox.width) {
+                demoBallPos = { demoBox.x + demoBox.width / 2.0f, demoBox.y + demoBox.height / 2.0f };
+                demoBallSpeed.x *= -1;
+            }
+        }
+        else if (currentScreen == COUNTDOWN) {
+            countdownTimer -= dt;
+            if (countdownTimer <= 0.0f) {
+                currentScreen = GAMEPLAY;
+            }
+        }
+        else if (currentScreen == GAMEPLAY) {
+            // --- LEFT PADDLE MOVEMENT ---
+            if (isSolo && useMouse) {
+                leftPaddle.y = GetMouseY() - paddleHeight / 2.0f;
+            } else {
+                if (IsKeyDown(KEY_W)) leftPaddle.y -= paddleSpeed * dt;
+                if (IsKeyDown(KEY_S)) leftPaddle.y += paddleSpeed * dt;
+            }
+
+            // Clamp Left Paddle
+            if (leftPaddle.y < 50) leftPaddle.y = 50;
+            if (leftPaddle.y + paddleHeight > screenHeight) leftPaddle.y = screenHeight - paddleHeight;
+
+            // --- RIGHT PADDLE MOVEMENT (2 Player Only) ---
+            if (!isSolo) {
+                if (IsKeyDown(KEY_UP)) rightPaddle.y -= paddleSpeed * dt;
+                if (IsKeyDown(KEY_DOWN)) rightPaddle.y += paddleSpeed * dt;
+
+                if (rightPaddle.y < 50) rightPaddle.y = 50;
+                if (rightPaddle.y + paddleHeight > screenHeight) rightPaddle.y = screenHeight - paddleHeight;
+            }
+
+            // --- BALL MOVEMENT ---
+            ballPos.x += ballSpeed.x * speedMultiplier * dt;
+            ballPos.y += ballSpeed.y * speedMultiplier * dt;
+
+            // Top & Bottom Wall Bounce
+            if (ballPos.y - ballRadius <= 50) {
+                ballPos.y = 50 + ballRadius;
+                ballSpeed.y *= -1;
+            }
+            if (ballPos.y + ballRadius >= screenHeight) {
+                ballPos.y = screenHeight - ballRadius;
+                ballSpeed.y *= -1;
+            }
+
+            // Left Paddle Collision
+            if (CheckCollisionCircleRec(ballPos, ballRadius, leftPaddle)) {
+                ballPos.x = leftPaddle.x + leftPaddle.width + ballRadius;
+                ballSpeed.x = fabs(ballSpeed.x);
+
+                if (isSolo) {
+                    score1 += 10;
+                    // Speed up every 30 points
+                    if (score1 / 30 > lastSpeedMilestone) {
+                        lastSpeedMilestone = score1 / 30;
+                        speedMultiplier += 0.15f;
+                    }
+                    // Win at 100 points
+                    if (score1 >= 100) {
+                        winnerText = "YOU REACHED 100 POINTS! YOU WIN!";
+                        currentScreen = GAMEOVER;
+                    }
+                }
+            }
+
+            // Right Side Logic (Wall in Solo, Paddle in 2P)
+            if (isSolo) {
+                if (ballPos.x + ballRadius >= screenWidth - 15) {
+                    ballPos.x = screenWidth - 15 - ballRadius;
+                    ballSpeed.x = -fabs(ballSpeed.x);
+                }
+                if (ballPos.x < 0) {
+                    winnerText = "GAME OVER! Final Score: " + std::to_string(score1);
+                    currentScreen = GAMEOVER;
+                }
+            } else {
+                if (CheckCollisionCircleRec(ballPos, ballRadius, rightPaddle)) {
+                    ballPos.x = rightPaddle.x - ballRadius;
+                    ballSpeed.x = -fabs(ballSpeed.x);
+                }
+
+                // Player 2 Scores
+                if (ballPos.x < 0) {
+                    score2++;
+                    if (score2 % 2 == 0) speedMultiplier += 0.15f;
+
+                    if (score2 >= 10) {
+                        winnerText = "PLAYER 2 WINS!";
+                        currentScreen = GAMEOVER;
+                    } else {
+                        ballPos = { screenWidth / 2.0f, screenHeight / 2.0f };
+                        ballSpeed.x = 350.0f;
+                    }
+                }
+
+                // Player 1 Scores
+                if (ballPos.x > screenWidth) {
+                    score1++;
+                    if (score1 % 2 == 0) speedMultiplier += 0.15f;
+
+                    if (score1 >= 10) {
+                        winnerText = "PLAYER 1 WINS!";
+                        currentScreen = GAMEOVER;
+                    } else {
+                        ballPos = { screenWidth / 2.0f, screenHeight / 2.0f };
+                        ballSpeed.x = -350.0f;
+                    }
+                }
+            }
+        }
+
+        // ---------------------------------------------------------
+        // DRAWING / VISUAL DISPLAY
+        // ---------------------------------------------------------
+        BeginDrawing();
+        ClearBackground(Color{ 18, 22, 33, 255 });
+
+        // 1. WELCOME SCREEN
+        if (currentScreen == WELCOME) {
+            DrawText("BOUNCE BACK PONG", screenWidth/2 - MeasureText("BOUNCE BACK PONG", 48)/2, 70, 48, SKYBLUE);
+            DrawText("Created by Sakshi.M and Pari.P", screenWidth/2 - MeasureText("Created by Sakshi.M and Pari.P", 26)/2, 135, 26, GOLD);
+
+            DrawRectangleLines(80, 190, screenWidth - 160, 220, DARKGRAY);
+            DrawText("HOW IT RELATES TO THE THEME 'BOUNCE BACK':", 110, 210, 20, WHITE);
+            DrawText("- Every shot that comes at you is a chance to bounce back stronger!", 110, 250, 18, LIGHTGRAY);
+            DrawText("- As your rally continues, the ball speeds up, testing your reflexes", 110, 285, 18, LIGHTGRAY);
+            DrawText("  and forcing you to adapt and bounce back under pressure.", 110, 315, 18, LIGHTGRAY);
+            DrawText("- Never let the ball slip past—keep the momentum alive!", 110, 355, 18, LIGHTGRAY);
+
+            if (DrawButton({ screenWidth/2.0f - 120, 450, 240, 55 }, "NEXT: RULES", DARKBLUE, BLUE, WHITE)) {
+                currentScreen = RULES;
+            }
+        }
+
+        // 2. RULES SCREEN
+        else if (currentScreen == RULES) {
+            DrawText("GAME RULES", screenWidth/2 - MeasureText("GAME RULES", 42)/2, 60, 42, SKYBLUE);
+
+            DrawText("SOLO MODE:", 100, 140, 26, GOLD);
+            DrawText("- Bounce the ball off the back wall to earn +10 points per hit.", 120, 175, 20, WHITE);
+            DrawText("- Every 30 points, the game gets faster!", 120, 205, 20, WHITE);
+            DrawText("- Reach 100 points to WIN the game!", 120, 235, 20, GREEN);
+
+            DrawText("2-PLAYER MODE:", 100, 295, 26, GOLD);
+            DrawText("- Player 1 (Left) uses W / S. Player 2 (Right) uses UP / DOWN Arrows.", 120, 330, 20, WHITE);
+            DrawText("- Every 2 points a player earns, the ball speeds up!", 120, 360, 20, WHITE);
+            DrawText("- First player to 10 points wins the match!", 120, 390, 20, GREEN);
+
+            if (DrawButton({ screenWidth/2.0f - 140, 470, 280, 55 }, "CHOOSE GAME MODE", DARKBLUE, BLUE, WHITE)) {
+                currentScreen = MODE_SELECT;
+            }
+        }
+
+        // 3. MODE SELECT (1 PLAYER OR 2 PLAYERS)
+        else if (currentScreen == MODE_SELECT) {
+            DrawText("SELECT GAME MODE", screenWidth/2 - MeasureText("SELECT GAME MODE", 40)/2, 100, 40, SKYBLUE);
+
+            if (DrawButton({ screenWidth/2.0f - 160, 220, 320, 65 }, "1 PLAYER (SOLO)", DARKGREEN, GREEN, WHITE)) {
+                isSolo = true;
+                currentScreen = CONTROL_SELECT;
+            }
+
+            if (DrawButton({ screenWidth/2.0f - 160, 320, 320, 65 }, "2 PLAYERS (VERSUS)", MAROON, RED, WHITE)) {
+                isSolo = false;
+                useMouse = false; // Mouse only works for solo
+                currentScreen = PRE_START;
+            }
+        }
+
+        // 4. CONTROL SELECT (SOLO ONLY: KEYBOARD OR MOUSE)
+        else if (currentScreen == CONTROL_SELECT) {
+            DrawText("CHOOSE YOUR CONTROLS", screenWidth/2 - MeasureText("CHOOSE YOUR CONTROLS", 38)/2, 100, 38, SKYBLUE);
+            DrawText("(Mouse control is exclusively available for Solo Mode)", screenWidth/2 - MeasureText("(Mouse control is exclusively available for Solo Mode)", 20)/2, 155, 20, GRAY);
+
+            if (DrawButton({ screenWidth/2.0f - 160, 230, 320, 65 }, "KEYBOARD (W / S)", DARKBLUE, BLUE, WHITE)) {
+                useMouse = false;
+                currentScreen = PRE_START;
+            }
+
+            if (DrawButton({ screenWidth/2.0f - 160, 330, 320, 65 }, "MOUSE CONTROL", PURPLE, VIOLET, WHITE)) {
+                useMouse = true;
+                currentScreen = PRE_START;
+            }
+        }
+
+        // 5. OPTIONAL TUTORIAL CHOICE SCREEN
+        else if (currentScreen == PRE_START) {
+            DrawText("READY TO PLAY?", screenWidth/2 - MeasureText("READY TO PLAY?", 42)/2, 95, 42, SKYBLUE);
+
+            const char* modeSummary = isSolo 
+                ? (useMouse ? "Selected: 1 Player (Mouse Control)" : "Selected: 1 Player (Keyboard: W / S)")
+                : "Selected: 2 Players (P1: W/S | P2: Up/Down Arrows)";
+            DrawText(modeSummary, screenWidth/2 - MeasureText(modeSummary, 22)/2, 160, 22, GOLD);
+
+            // Optional Tutorial Button
+            if (DrawButton({ screenWidth/2.0f - 170, 235, 340, 65 }, "VIEW TUTORIAL (DEMO)", DARKBLUE, BLUE, WHITE)) {
+                ResetDemo();
+                currentScreen = TUTORIAL;
+            }
+
+            // Direct Start Game Button
+            if (DrawButton({ screenWidth/2.0f - 170, 330, 340, 65 }, "START GAME", DARKGREEN, GREEN, WHITE)) {
+                ResetMatch();
+                currentScreen = COUNTDOWN;
+            }
+        }
+
+        // 6. INTERACTIVE TUTORIAL / PLAYABLE MINI-DEMO PAGE
+        else if (currentScreen == TUTORIAL) {
+            DrawText("INTERACTIVE TUTORIAL - TRY IT OUT!", screenWidth/2 - MeasureText("INTERACTIVE TUTORIAL - TRY IT OUT!", 34)/2, 35, 34, GOLD);
+
+            // Instruction subtitle tailored to selected mode/controls
+            const char* demoHint = "";
+            if (isSolo && useMouse) {
+                demoHint = "Move your MOUSE up & down to bounce the ball off the right wall!";
+            } else if (isSolo && !useMouse) {
+                demoHint = "Press [W] (Up) and [S] (Down) to bounce the ball off the right wall!";
+            } else {
+                demoHint = "Player 1: Press [W]/[S]  |  Player 2: Press [UP]/[DOWN] Arrows!";
+            }
+            DrawText(demoHint, screenWidth/2 - MeasureText(demoHint, 20)/2, 85, 20, WHITE);
+
+            // Draw Interactive Mini-Arena Box
+            DrawRectangleRec(demoBox, Color{ 10, 13, 22, 255 });
+            DrawRectangleLinesEx(demoBox, 3, SKYBLUE);
+
+            // Draw Demo Left Paddle
+            DrawRectangleRec(demoLeftPaddle, SKYBLUE);
+
+            // Draw Demo Right Backboard (Solo) or Right Paddle (2P)
+            if (isSolo) {
+                DrawRectangle(demoBox.x + demoBox.width - 10, demoBox.y, 10, demoBox.height, DARKGRAY);
+            } else {
+                DrawRectangleRec(demoRightPaddle, ORANGE);
+            }
+
+            // Draw Demo Ball
+            DrawCircleV(demoBallPos, demoBallRadius, WHITE);
+
+            // Interactive button inside tutorial to reset demo ball position
+            if (DrawButton({ screenWidth/2.0f - 110, 405, 220, 40 }, "RESET DEMO BALL", DARKGRAY, GRAY, WHITE)) {
+                ResetDemo();
+            }
+
+            // Start Button right below the demo box
+            if (DrawButton({ screenWidth/2.0f - 150, 470, 300, 65 }, "START GAME", DARKGREEN, GREEN, WHITE)) {
+                ResetMatch();
+                currentScreen = COUNTDOWN;
+            }
+        }
+
+        // 7. COUNTDOWN SCREEN ("Game starts in 3 2 1!")
+        else if (currentScreen == COUNTDOWN) {
+            int countNum = (int)ceil(countdownTimer);
+            std::string countText = "Game starts in " + std::to_string(countNum) + "!";
+            DrawText(countText.c_str(), screenWidth/2 - MeasureText(countText.c_str(), 44)/2, screenHeight/2 - 22, 44, GOLD);
+        }
+
+        // 8. ACTIVE GAMEPLAY SCREEN
+        else if (currentScreen == GAMEPLAY) {
+            // Top HUD Bar
+            DrawRectangle(0, 0, screenWidth, 50, Color{ 10, 12, 20, 255 });
+            DrawLine(0, 50, screenWidth, 50, SKYBLUE);
+
+            // Score in Top-Left Corner
+            if (isSolo) {
+                DrawText(TextFormat("SCORE: %d / 100", score1), 20, 13, 24, WHITE);
+            } else {
+                DrawText(TextFormat("P1: %d   |   P2: %d", score1, score2), 20, 13, 24, WHITE);
+            }
+
+            // Creator Credit in Top-Right Corner (Stays until Game Over)
+            const char* creditText = "Made by Sakshi.M & Pari.P";
+            DrawText(creditText, screenWidth - MeasureText(creditText, 20) - 20, 15, 20, GOLD);
+
+            // Draw Left Paddle
+            DrawRectangleRec(leftPaddle, SKYBLUE);
+
+            // Draw Right Wall (Solo) or Right Paddle (2-Player)
+            if (isSolo) {
+                DrawRectangle(screenWidth - 15, 50, 15, screenHeight - 50, DARKGRAY);
+            } else {
+                DrawRectangleRec(rightPaddle, ORANGE);
+                for (int y = 60; y < screenHeight; y += 30) {
+                    DrawRectangle(screenWidth/2 - 2, y, 4, 15, DARKGRAY);
+                }
+            }
+
+            // Draw Ball
+            DrawCircleV(ballPos, ballRadius, WHITE);
+        }
+
+        // 9. GAME OVER SCREEN + RESTART BUTTON
+        else if (currentScreen == GAMEOVER) {
+            DrawText(winnerText.c_str(), screenWidth/2 - MeasureText(winnerText.c_str(), 36)/2, 180, 36, GOLD);
+            DrawText("Thanks for playing Bounce Back Pong!", screenWidth/2 - MeasureText("Thanks for playing Bounce Back Pong!", 22)/2, 240, 22, LIGHTGRAY);
+
+            // Restart goes directly to choosing Solo vs 2-Player
+            if (DrawButton({ screenWidth/2.0f - 150, 330, 300, 65 }, "PLAY AGAIN (RESTART)", DARKGREEN, GREEN, WHITE)) {
+                ResetMatch();
+                currentScreen = MODE_SELECT;
+            }
+        }
+
+        EndDrawing();
+    }
+
+    CloseWindow();
+    return 0;
+}
