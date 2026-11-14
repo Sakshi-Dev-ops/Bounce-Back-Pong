@@ -41,3 +41,4 @@ In **Bounce Back Pong**, every incoming shot is a test of resilience and momentu
 ## 🚀 Running Locally
 1. Clone or download this repository.
 2. Open `index.html` in any modern web browser (Chrome, Edge, Firefox, Safari) to play immediately—no installation required!
+3. Or use this link: https://nightshadewolf417.itch.io/bounce-back-pong
